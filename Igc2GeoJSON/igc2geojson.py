@@ -13,6 +13,16 @@ import time
 
 DT = 60 # Time averaging factor
 
+# IGC Data extracted out of a .igc file
+class IgcData:
+    def __init__(self):
+        self.b_records = []
+        self.records_timestamp = []
+        self.records_latitude = []
+        self.records_longitude = []
+        self.records_pressure_altitude = []
+        self.records_engine_noise_level = []
+
 def read_igc(input):
     """reads .igc file and returns in order:
             - gps fix line data
@@ -24,19 +34,14 @@ def read_igc(input):
             - raw_data
     """
     raw_data = []
-    b_records = []
-    records_timestamp = []
-    records_latitude = []
-    records_longitude = []
-    records_pressure_altitude = []
-    records_engine_noise_level = []
-    records_task =[]
     
     # ENL if applicable
     is_enl_present = False
     enl_index_start = None
     enl_index_stop = None
     
+    igcData = IgcData()
+
     for line in open(input):
         if line.startswith(('HFDTE')):
             day, month, year = line[5:7], line[7:9], line[9:11]
@@ -61,7 +66,7 @@ def read_igc(input):
 
             # Add point into dataset
             is_point_valid = True 
-            if not (enl is None) and  enl >= 60:   # Check for ENL level
+            if not (enl is None) and (enl >= 60 or enl==0):   # Check for ENL level
                 is_point_valid = False
 
             p=1
@@ -75,20 +80,14 @@ def read_igc(input):
             pressure_altitude_ = PPPPP
 
             if is_point_valid:
-                records_timestamp.append(epoch)
-                records_latitude.append(lat_)
-                records_longitude.append(lon_)
-                records_pressure_altitude.append(pressure_altitude_)
-                b_records.append([time_as_string, lat_, lon_, pressure_altitude_])
-                records_engine_noise_level.append(enl)
+                igcData.records_timestamp.append(epoch)
+                igcData.records_latitude.append(lat_)
+                igcData.records_longitude.append(lon_)
+                igcData.records_pressure_altitude.append(pressure_altitude_)
+                igcData.b_records.append([time_as_string, lat_, lon_, pressure_altitude_])
+                igcData.records_engine_noise_level.append(enl)
 
-        if line.startswith('C'):
-            if i!=0:
-                records_task.append([float(line[9:12])+(float(line[12:14])+ float(line[14:17])/1000)/60,
-                             float(line[1:3])+(float(line[3:5])+ float(line[5:8])/1000)/60])
-            i+=1
-
-    return b_records, records_timestamp, np.asarray(records_latitude), np.asarray(records_longitude), np.asarray(records_pressure_altitude), records_task, np.asarray(records_engine_noise_level)
+    return igcData
 
 def average_t(x,dx):
     """time averaging over DT"""
@@ -117,40 +116,41 @@ for file in os.listdir("{}".format(dir)):
     if file.endswith(".igc"):
         files.append(file)
 
-fix_big = []
-w_big = []
+### Browse through files to collect and compute data
+aggregated_points = []
+aggregated_varios = []
 
 #Collect all flights and average them over DT
 for file in files:
-    tuple_igc = read_igc("{0}/{1}".format(dir, file))
+    igc_records = read_igc("{0}/{1}".format(dir, file))
 
-    timestamp_average = average_t(tuple_igc[1],DT)
-    latitude_a = average_t(tuple_igc[2],DT)
-    longitude_a = average_t(tuple_igc[3],DT)
-    engine_noise_levels = tuple_igc[6]
+    timestamp_average = average_t(igc_records.records_timestamp,DT)
+    latitude_a = average_t(igc_records.records_latitude,DT)
+    longitude_a = average_t(igc_records.records_longitude,DT)
+    engine_noise_levels =  average_t(igc_records.records_engine_noise_level, DT)
 
     # Compute average vario
-    altitude_average = average_t(tuple_igc[4],DT)
+    altitude_average = average_t(igc_records.records_pressure_altitude,DT)
     try:
         vario_average = np.gradient(altitude_average,timestamp_average)
     except:
-        # TODO: No idea why the aboce function fails in some cases...will have to investigate...
+        # TODO: No idea why the above function fails in some cases...will have to investigate...
         pass
 
-    
     for timestamp, vario, lat, lon, alt, enl in zip(timestamp_average,vario_average,latitude_a,longitude_a,altitude_average, engine_noise_levels):
         if vario>=0:
-            fix = np.stack((int(timestamp), lat,lon,alt, enl))
-            fix_big.append(fix)
-            w_big.append(vario)
+            fix = np.stack((int(timestamp), lat,lon,int(alt), int(enl)))
+            aggregated_points.append(fix)
+            aggregated_varios.append(vario)
 
-#Create gjson points
+### Output: Create gjson points
 features = []
-for point, m in zip(fix_big,w_big):
+for point, m in zip(aggregated_points,aggregated_varios):
     json_point=gjson.Point((point[2],point[1],int(point[3])))
     timestamp = point[0]
+    altitude = point[3]
     enl = point[4]
-    features.append(gjson.Feature(geometry=json_point, properties={"vario": round(m,2), "enl": enl, "time": timestamp}))
+    features.append(gjson.Feature(geometry=json_point, properties={"vario": round(m,2), "altitude": altitude, "enl": enl, "time": timestamp}))
 
 feature_collection = gjson.FeatureCollection(features)
 
