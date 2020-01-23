@@ -24,13 +24,14 @@ def read_igc(input):
             - raw_data
     """
     raw_data = []
-    time = []
-    lat = []
-    lon = []
-    palt = []
-    task =[]
-    tdata = []
-    engine_noise_levels = []
+    b_records = []
+    records_timestamp = []
+    records_latitude = []
+    records_longitude = []
+    records_pressure_altitude = []
+    records_engine_noise_level = []
+    records_task =[]
+    
     # ENL if applicable
     is_enl_present = False
     enl_index_start = None
@@ -52,7 +53,7 @@ def read_igc(input):
             t_m = float(line[3:5])
             t_s = float(line[5:7])
             # time_= (t_h*60+t_m)*60+t_s
-            timest = '{0}-{1}-20{2} {3}:{4}:{5}'.format(day,month,year,int(t_h),int(t_m),int(t_s))
+            time_as_string = '{0}-{1}-20{2} {3}:{4}:{5}'.format(day,month,year,int(t_h),int(t_m),int(t_s))
 
             epoch = int(datetime.datetime(2000+int(year), int(month), int(day), int(t_h), int(t_m), int(t_s)).timestamp())
 
@@ -71,22 +72,23 @@ def read_igc(input):
                 g=-1
             lat_ = (float(line[7:9])+(float(line[9:11])+ float(line[11:14])/1000)/60)*p
             lon_ = (float(line[15:18])+(float(line[18:20])+ float(line[20:23])/1000)/60)*g
+            pressure_altitude_ = PPPPP
 
             if is_point_valid:
-                time.append(epoch)
-                lat.append(lat_)
-                lon.append(lon_)
-                palt.append(PPPPP)
-                tdata.append([timest, lat_, lon_, PPPPP])
-                engine_noise_levels.append(enl)
+                records_timestamp.append(epoch)
+                records_latitude.append(lat_)
+                records_longitude.append(lon_)
+                records_pressure_altitude.append(pressure_altitude_)
+                b_records.append([time_as_string, lat_, lon_, pressure_altitude_])
+                records_engine_noise_level.append(enl)
 
-        # if line.startswith('C'):
-        #     if i!=0:
-        #         task.append([float(line[9:12])+(float(line[12:14])+ float(line[14:17])/1000)/60,
-        #                      float(line[1:3])+(float(line[3:5])+ float(line[5:8])/1000)/60])
-        #     i+=1
+        if line.startswith('C'):
+            if i!=0:
+                records_task.append([float(line[9:12])+(float(line[12:14])+ float(line[14:17])/1000)/60,
+                             float(line[1:3])+(float(line[3:5])+ float(line[5:8])/1000)/60])
+            i+=1
 
-    return tdata, time, np.asarray(lat), np.asarray(lon), np.asarray(palt), task, np.asarray(engine_noise_levels)
+    return b_records, records_timestamp, np.asarray(records_latitude), np.asarray(records_longitude), np.asarray(records_pressure_altitude), records_task, np.asarray(records_engine_noise_level)
 
 def average_t(x,dx):
     """time averaging over DT"""
